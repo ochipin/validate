@@ -3,6 +3,7 @@ package validate
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -39,138 +40,201 @@ type Validate struct {
 // Result : 復帰値情報を返却する
 func (validate *Validate) Result() Result { return validate.result }
 
+func (validate *Validate) confirm(fn func(value string) bool) {
+	value := reflect.ValueOf(validate.Value)
+	if value.Kind() == reflect.Slice {
+		// スライスの場合、全要素を検証する
+		for i := 0; i < value.Len(); i++ {
+			if fn(fmt.Sprint(value.Index(i).Interface())) == false {
+				break
+			}
+		}
+	} else {
+		// スライス以外の場合、要素を検証する
+		fn(fmt.Sprint(validate.Value))
+	}
+}
+
 // Require : 空文字列か確認する
 func (validate *Validate) Require() Result {
-	// 空文字列の場合、エラーとして扱う
-	if fmt.Sprint(validate.Value) == "" {
-		validate.Result().Message("It is a required input item")
-	}
+	validate.confirm(func(value string) bool {
+		// 空文字列の場合、エラーとして扱う
+		if value == "" {
+			validate.Result().Message("It is a required input item")
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // MaxLen : 文字数の長さ制限
 func (validate *Validate) MaxLen(max int) Result {
-	// 文字列が、指定した数より長い場合エラーとして扱う
-	length := len(fmt.Sprint(validate.Value))
-	if length > max {
-		validate.Result().Message(fmt.Sprintf("String too long. %s(%d) > max(%d)", validate.Value, length, max))
-	}
+	validate.confirm(func(value string) bool {
+		// 文字列が、指定した数より長い場合エラーとして扱う
+		length := len(value)
+		if length > max {
+			validate.Result().Message(fmt.Sprintf("String too long. %s(%d) > max(%d)", value, length, max))
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // MinLen : 文字数の短さ制限
 func (validate *Validate) MinLen(min int) Result {
-	// 文字列が、指定した数より短い場合エラーとして扱う
-	length := len(fmt.Sprint(validate.Value))
-	if length < min {
-		validate.Result().Message(fmt.Sprintf("String too short. %s(%d) < min(%d)", validate.Value, length, min))
-	}
+	validate.confirm(func(value string) bool {
+		// 文字列が、指定した数より短い場合エラーとして扱う
+		length := len(fmt.Sprint(value))
+		if length < min {
+			validate.Result().Message(fmt.Sprintf("String too short. %s(%d) < min(%d)", value, length, min))
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // EMail : E-MAIL アドレスのチェック
 func (validate *Validate) EMail() Result {
 	var result = validate.Result()
-	// 既に何らかのエラーに遭遇している場合はスルーする
-	if validate.Value == "" {
-		return result
-	}
-	email := fmt.Sprint(validate.Value)
-	// E-MAIL アドレスを @ で分割し、ローカルパートとドメイン部分を分ける
-	address := strings.Split(email, "@")
-	// 2つ以外に分割された場合、またはローカルパート、ドメイン部分が空の場合、メールアドレスが正しくないためエラーとする
-	if len(address) != 2 || address[0] == "" || address[1] == "" {
-		result.Message("E-MAIL address is wrong")
-		return result
-	}
-	localpart, domain := address[0], address[1]
-	// ローカルパートがascii文字だけで構成されているか確認する
-	for _, v := range []byte(localpart) {
-		if v > 127 {
-			result.Message("E-MAIL address is wrong")
-			return result
+	validate.confirm(func(email string) bool {
+		// 空文字列の場合はスルーする
+		if email == "" {
+			return true
 		}
-	}
-	// ドメイン部分がascii文字だけで構成されているか確認する
-	for _, v := range []byte(domain) {
-		if v > 127 {
+		// E-MAIL アドレスを @ で分割し、ローカルパートとドメイン部分を分ける
+		address := strings.Split(email, "@")
+		// 2つ以外に分割された場合、またはローカルパート、ドメイン部分が空の場合、メールアドレスが正しくないためエラーとする
+		if len(address) != 2 || address[0] == "" || address[1] == "" {
 			result.Message("E-MAIL address is wrong")
-			return result
+			return false
 		}
-	}
+		localpart, domain := address[0], address[1]
+		// ローカルパートがascii文字だけで構成されているか確認する
+		for _, v := range []byte(localpart) {
+			if v > 127 {
+				result.Message("E-MAIL address is wrong")
+				return false
+			}
+		}
+		// ドメイン部分がascii文字だけで構成されているか確認する
+		for _, v := range []byte(domain) {
+			if v > 127 {
+				result.Message("E-MAIL address is wrong")
+				return false
+			}
+		}
+		return true
+	})
 	return result
 }
 
 // Number : 数字か否かを確認する
 func (validate *Validate) Number() Result {
-	// 数値変換可能かチェック
-	_, err := strconv.Atoi(fmt.Sprint(validate.Value))
-	if err != nil {
-		validate.Result().Message(err.Error())
-	}
+	validate.confirm(func(value string) bool {
+		// 数値変換可能かチェック
+		_, err := strconv.Atoi(value)
+		if err != nil {
+			validate.Result().Message(err.Error())
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // Max : 指定した数字が、max最大値を超過しているか確認
 func (validate *Validate) Max(max int) Result {
-	// 数値変換可能かチェック
-	n, err := strconv.Atoi(fmt.Sprint(validate.Value))
-	if err != nil {
-		validate.Result().Message(err.Error())
-	} else if n > max {
-		validate.Result().Message(fmt.Sprintf("Exceeds the maximum value. %d > %d", n, max))
-	}
+	validate.confirm(func(value string) bool {
+		// 数値変換可能かチェック
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			validate.Result().Message(err.Error())
+			return false
+		}
+		if n > max {
+			validate.Result().Message(fmt.Sprintf("Exceeds the maximum value. %d > %d", n, max))
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // Min : 指定した数字が、min最小値を下回っているか確認
 func (validate *Validate) Min(min int) Result {
-	// 数値変換可能かチェック
-	n, err := strconv.Atoi(fmt.Sprint(validate.Value))
-	if err != nil {
-		validate.Result().Message(err.Error())
-	} else if n < min {
-		validate.Result().Message(fmt.Sprintf("Exceeds the min value. %d < %d", n, min))
-	}
+	validate.confirm(func(value string) bool {
+		// 数値変換可能かチェック
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			validate.Result().Message(err.Error())
+			return false
+		}
+		if n < min {
+			validate.Result().Message(fmt.Sprintf("Exceeds the min value. %d < %d", n, min))
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // Date : 日付か否かを確認する
 func (validate *Validate) Date() Result {
-	// 2019-01-02, 2018/01/02, 2018/1/2, 2018/2/02 を許可する
-	date := strings.Replace(fmt.Sprint(validate.Value), "/", "-", -1)
-	match, err := regexp.MatchString(`^\d{4}[\-\/](\d{2}|\d)[\-\/](\d{2}|\d)$`, date)
-	if !match || err != nil {
-		validate.Result().Message("Not date")
-	} else if _, err := time.Parse("2006-01-02", date); err != nil {
-		validate.Result().Message(err.Error())
-	}
+	validate.confirm(func(value string) bool {
+		// 2019-01-02, 2018/01/02, 2018/1/2, 2018/2/02 を許可する
+		date := strings.Replace(value, "/", "-", -1)
+		match, err := regexp.MatchString(`^\d{4}[\-\/](\d{2}|\d)[\-\/](\d{2}|\d)$`, date)
+		if !match || err != nil {
+			validate.Result().Message("Not date")
+			return false
+		}
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			validate.Result().Message(err.Error())
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // URL : 指定された文字列がURLか確認する
 func (validate *Validate) URL() Result {
-	if validate.Value == "" {
-		return validate.Result()
-	}
-	match, err := regexp.MatchString(`^https?://[\w/:%#\$&\?\(\)~\.=\+\-]+$`, fmt.Sprint(validate.Value))
-	if !match || err != nil {
-		validate.Result().Message("Not URL")
-	}
+	validate.confirm(func(value string) bool {
+		if value == "" {
+			return true
+		}
+		match, err := regexp.MatchString(`^https?://[\w/:%#\$&\?\(\)~\.=\+\-]+$`, value)
+		if !match || err != nil {
+			validate.Result().Message("Not URL")
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 
 // Match : 正規表現とマッチしているか確認する
 func (validate *Validate) Match(regex string) Result {
-	if validate.Value == "" {
-		return validate.Result()
-	}
+	// 正規表現オブジェクトを生成する
 	r, err := regexp.Compile(regex)
 	if err != nil {
 		validate.Result().Message(err.Error())
-	} else if r.MatchString(fmt.Sprint(validate.Value)) == false {
-		validate.Result().Message(regex + " no match")
+		return validate.Result()
 	}
+
+	validate.confirm(func(value string) bool {
+		if value == "" {
+			return true
+		}
+		if r.MatchString(value) == false {
+			validate.Result().Message(regex + " no match")
+			return false
+		}
+		return true
+	})
 	return validate.Result()
 }
 

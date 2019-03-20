@@ -50,6 +50,22 @@ func Test__Validate2(t *testing.T) {
 		t.Fatal("HasError()")
 	}
 }
+
+func Test__Validate3(t *testing.T) {
+	// 配列の要素内に、空文字列が存在していた場合、エラーとなる
+	validator := Validator([]string{"array1", "array2", ""})
+	validator.Require()
+	if validator.HasErrors() == false {
+		t.Fatal("HasError()")
+	}
+
+	validator = Validator([]string{"min", "maxlen"})
+	validator.MinLen(4)
+	if validator.HasErrors() == false {
+		t.Fatal("HasError()")
+	}
+}
+
 func Test__Validates(t *testing.T) {
 	validators, err := Validators(map[string]interface{}{
 		"username": "User Name",
